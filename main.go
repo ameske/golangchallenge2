@@ -31,34 +31,29 @@ func NewSecureReader(r io.Reader, priv, pub *[32]byte) io.Reader {
 
 // Read implements the io.Reader interface on secureReader
 func (sr SecureReader) Read(p []byte) (n int, err error) {
-	nonce := new([24]byte)
 	encrypted := make([]byte, 32000)
 
-	// TODO - We need to figure out how to handle what happens if this
-	// doesn't read in full
 	n, err = sr.Reader.Read(encrypted)
 	if err != nil {
 		return 0, err
 	}
 
+	// The encrypted message has the 24 byte nonce prepended
+	nonce := new([24]byte)
 	copy(nonce[:], encrypted[0:24])
 	encrypted = encrypted[24:n]
 
-	// TODO - Figure out what the first parameter actually does
-	decrypted, ok := box.Open(make([]byte, 0), encrypted, nonce, sr.pub, sr.priv)
+	decrypted, ok := box.Open(nil, encrypted, nonce, sr.pub, sr.priv)
 	if !ok {
-		return 0, errors.New("Unable to decrypt message")
+		return 0, errors.New("unable to decrypt message")
 	}
 
-	for i := 0; i < len(decrypted); i++ {
-		p[i] = decrypted[i]
-	}
+	copy(p, decrypted)
 
 	return len(decrypted), nil
 }
 
-// secureWriter handles encryption of data using the NaCl
-// box asymmetric crypto sytem.
+// secureWriter handles encryption of data using the NaCl asymmetric crypto sytem.
 type SecureWriter struct {
 	io.Writer
 	priv, pub *[32]byte
@@ -75,19 +70,19 @@ func NewSecureWriter(w io.Writer, priv, pub *[32]byte) io.Writer {
 
 // Write implements the io.Writer interface on secureWriter.
 func (sw SecureWriter) Write(p []byte) (n int, err error) {
-	// TODO - Figure out what this actually does
-	out := make([]byte, 0)
-
 	nonce := new([24]byte)
 	n, err = rand.Read(nonce[:])
 	if n < 24 {
-		return 0, errors.New("Unable to get 24 bytes of randomnness for nonce")
+		return 0, errors.New("secureWriter: unable to get 24 bytes of randomnness for nonce")
 	} else if err != nil {
 		return 0, err
 	}
 
+	// We want the nonce prepended to the encrypted message
+	out := make([]byte, 24, 24+len(p)+box.Overhead)
+	copy(out[0:24], nonce[:])
+
 	result := box.Seal(out, p, nonce, sw.pub, sw.priv)
-	result = append(nonce[:], result...)
 
 	return sw.Writer.Write(result)
 }
@@ -100,7 +95,8 @@ type SecureConn struct {
 	net.Conn
 }
 
-// NewSecureConn instantiates a new SecureConn
+// NewSecureConn instantiates a new SecureConn utilizing the given private and
+// public key
 func NewSecureConn(priv, pub *[32]byte, c net.Conn) io.ReadWriteCloser {
 	return SecureConn{
 		Writer: NewSecureWriter(c, priv, pub),
@@ -109,12 +105,12 @@ func NewSecureConn(priv, pub *[32]byte, c net.Conn) io.ReadWriteCloser {
 	}
 }
 
-// Write calls the underlying Writer's write method
+// Write calls the SecureWriter's underlying io.Writer
 func (sc SecureConn) Write(p []byte) (n int, err error) {
 	return sc.Writer.Write(p)
 }
 
-// Read calls the underlying Reader's read method
+// Read calls the SecureWriter's underlying io.Reader
 func (sc SecureConn) Read(p []byte) (n int, err error) {
 	return sc.Reader.Read(p)
 }

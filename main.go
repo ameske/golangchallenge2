@@ -13,14 +13,15 @@ import (
 	"golang.org/x/crypto/nacl/box"
 )
 
-// SecureReader handles decryption of data using the NaCl
-// box asymmetric crypto system.
+// SecureReader decrypts messages encrypted using the NaCl asymmetric
+// cryptosystem.
 type SecureReader struct {
 	io.Reader
 	priv, pub *[32]byte
 }
 
-// NewSecureReader instantiates a new SecureReader
+// NewSecureReader instantiates a new SecureReader that will take data from the given
+// io.Reader and utilize the given privte and public keys for decryption.
 func NewSecureReader(r io.Reader, priv, pub *[32]byte) io.Reader {
 	return SecureReader{
 		Reader: r,
@@ -54,13 +55,14 @@ func (sr SecureReader) Read(p []byte) (n int, err error) {
 	return len(decrypted), nil
 }
 
-// SecureWriter handles encryption of data using the NaCl asymmetric crypto sytem.
+// SecureWriter writes encrypted messages using the NaCl asymmetric cryptosystem.
 type SecureWriter struct {
 	io.Writer
 	priv, pub *[32]byte
 }
 
-// NewSecureWriter instantiates a new SecureWriter
+// NewSecureWriter instantiates a new SecureWriter that will encrypt messages using the
+// given private and public keys and write it to the given io.Writer.
 func NewSecureWriter(w io.Writer, priv, pub *[32]byte) io.Writer {
 	return SecureWriter{
 		Writer: w,
@@ -86,8 +88,7 @@ func (sw SecureWriter) Write(p []byte) (n int, err error) {
 	return sw.Writer.Write(box.Seal(out, p, nonce, sw.pub, sw.priv))
 }
 
-// SecureConn is a lightweight net.conn that encrypts outgoing data
-// and decrypts incoming data using the NaCl box asymmetric cryptosystem.
+// SecureConn encrypts and decrypts messages using the NaCl asymmetric cryptosystem
 type SecureConn struct {
 	io.Writer
 	io.Reader
@@ -108,19 +109,17 @@ func NewSecureConn(priv, pub *[32]byte, c net.Conn) io.ReadWriteCloser {
 // connects to the server, perform the handshake
 // and return a reader/writer.
 func Dial(addr string) (io.ReadWriteCloser, error) {
-	// Connect to the server
 	conn, err := net.Dial("tcp", addr)
 	if err != nil {
 		return nil, err
 	}
 
-	// Generate the private/public key pair
 	pub, priv, err := box.GenerateKey(rand.Reader)
 	if err != nil {
 		return nil, err
 	}
 
-	// Perform the handshake
+	// Perform the handshake to exchange public keys. Server goes first.
 	serverPub := new([32]byte)
 	_, err = io.ReadFull(conn, serverPub[:])
 	if err != nil {
@@ -147,37 +146,39 @@ func Serve(l net.Listener) error {
 			return err
 		}
 
+		// Spawn a goroutine to handle the conn and securely echo back the message
 		go func(c net.Conn) {
-			_, err := conn.Write(pub[:])
+			_, err := c.Write(pub[:])
 			if err != nil {
 				log.Println("Error writing key: ", err)
-				conn.Close()
+				c.Close()
 				return
 			}
 
 			clientPub := new([32]byte)
-			_, err = io.ReadFull(conn, clientPub[:])
+			_, err = io.ReadFull(c, clientPub[:])
 			if err != nil {
 				log.Println("Error reading key: ", err)
-				conn.Close()
+				c.Close()
 				return
 			}
 
-			sc := NewSecureConn(priv, clientPub, conn)
+			// Create the secure connection now that the handshake is done
+			sc := NewSecureConn(priv, clientPub, c)
+			defer sc.Close()
 
 			message := make([]byte, 32000)
 			n, err := sc.Read(message)
 			if err != nil {
 				log.Println("Error reading message: ", err)
-				conn.Close()
 				return
 			}
 			message = message[:n]
 
+			// We don't know how big the encrypted message will be, so ignore n
 			_, err = sc.Write(message)
 			if err != nil {
 				log.Println("Error writing message: ", err)
-				conn.Close()
 				return
 			}
 		}(conn)

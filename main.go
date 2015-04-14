@@ -91,7 +91,7 @@ func (sw SecureWriter) Write(p []byte) (n int, err error) {
 type SecureConn struct {
 	io.Writer
 	io.Reader
-	net.Conn
+	io.Closer
 }
 
 // NewSecureConn instantiates a new SecureConn utilizing the given private and
@@ -100,18 +100,8 @@ func NewSecureConn(priv, pub *[32]byte, c net.Conn) io.ReadWriteCloser {
 	return SecureConn{
 		Writer: NewSecureWriter(c, priv, pub),
 		Reader: NewSecureReader(c, priv, pub),
-		Conn:   c,
+		Closer: c,
 	}
-}
-
-// Write calls the SecureWriter's underlying io.Writer
-func (sc SecureConn) Write(p []byte) (n int, err error) {
-	return sc.Writer.Write(p)
-}
-
-// Read calls the SecureWriter's underlying io.Reader
-func (sc SecureConn) Read(p []byte) (n int, err error) {
-	return sc.Reader.Read(p)
 }
 
 // Dial generates a private/public key pair,

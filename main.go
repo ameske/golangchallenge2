@@ -13,7 +13,7 @@ import (
 	"golang.org/x/crypto/nacl/box"
 )
 
-// secureReader handles decryption of data using the NaCl
+// SecureReader handles decryption of data using the NaCl
 // box asymmetric crypto system.
 type SecureReader struct {
 	io.Reader
@@ -29,7 +29,8 @@ func NewSecureReader(r io.Reader, priv, pub *[32]byte) io.Reader {
 	}
 }
 
-// Read implements the io.Reader interface on secureReader
+// Read implements the io.Reader interface on secureReader. The length
+// returned is the length of the read decrypted message.
 func (sr SecureReader) Read(p []byte) (n int, err error) {
 	encrypted := make([]byte, 32000)
 
@@ -53,7 +54,7 @@ func (sr SecureReader) Read(p []byte) (n int, err error) {
 	return len(decrypted), nil
 }
 
-// secureWriter handles encryption of data using the NaCl asymmetric crypto sytem.
+// SecureWriter handles encryption of data using the NaCl asymmetric crypto sytem.
 type SecureWriter struct {
 	io.Writer
 	priv, pub *[32]byte
@@ -82,12 +83,10 @@ func (sw SecureWriter) Write(p []byte) (n int, err error) {
 	out := make([]byte, 24, 24+len(p)+box.Overhead)
 	copy(out[0:24], nonce[:])
 
-	result := box.Seal(out, p, nonce, sw.pub, sw.priv)
-
-	return sw.Writer.Write(result)
+	return sw.Writer.Write(box.Seal(out, p, nonce, sw.pub, sw.priv))
 }
 
-// secureConn is a lightweight net.conn that encrypts outgoing data
+// SecureConn is a lightweight net.conn that encrypts outgoing data
 // and decrypts incoming data using the NaCl box asymmetric cryptosystem.
 type SecureConn struct {
 	io.Writer
